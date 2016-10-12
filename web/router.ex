@@ -77,13 +77,13 @@ defmodule ExqUi.RouterPlug do
 
     get "/api/scheduled" do
       {:ok, jobs} = Exq.Api.scheduled_with_scores(conn.assigns[:exq_name])
-      {:ok, json} = Poison.encode(%{scheduled: map_score_to_jobs(jobs) })
+      {:ok, json} = Poison.encode(%{scheduled: jobs |> map_args |> map_score_to_jobs })
       conn |> send_resp(200, json) |> halt
     end
 
     get "/api/retries" do
       {:ok, retries} = Exq.Api.retries(conn.assigns[:exq_name])
-      retries = retries |> map_jid_to_id |> convert_results_to_times(:failed_at)
+      retries = retries |> map_jid_to_id |> convert_results_to_times(:failed_at) |> map_args
       {:ok, json} = Poison.encode(%{retries: retries})
 
       conn |> send_resp(200, json) |> halt
@@ -91,7 +91,7 @@ defmodule ExqUi.RouterPlug do
 
     get "/api/failures" do
       {:ok, failures} = Exq.Api.failed(conn.assigns[:exq_name])
-      failures = failures |> map_jid_to_id |> convert_results_to_times(:failed_at)
+      failures = failures |> map_jid_to_id |> convert_results_to_times(:failed_at) |> map_args
       {:ok, json} = Poison.encode(%{failures: failures})
       conn |> send_resp(200, json) |> halt
     end
@@ -140,18 +140,17 @@ defmodule ExqUi.RouterPlug do
       {:ok, processes} = Exq.Api.processes(conn.assigns[:exq_name])
 
       process_jobs = for p <- processes do
-        process = Map.delete(p, "job")
+        process = Map.delete(p, :job)
         pjob = p.job
-        process = Map.put(process, :job_id, pjob["jid"])
+        process = Map.put(process, :job_id, pjob.jid)
         |> Map.put(:started_at, score_to_time(p.started_at))
         |> Map.put(:id, "#{process.host}:#{process.pid}")
-        pjob = Map.put(pjob, :id, pjob["jid"])
-        [process, pjob]
+        pjob = Map.put(pjob, :id, pjob.jid)
+        [process, map_args(pjob)]
       end
 
       processes = for [process, _job] <- process_jobs, do: process
       jobs = for [_process, job] <- process_jobs, do: job
-
       {:ok, json} = Poison.encode(%{processes: processes, jobs: jobs})
       conn |> send_resp(200, json) |> halt
     end
@@ -227,5 +226,11 @@ defmodule ExqUi.RouterPlug do
         |> Map.put(:id, job.jid)
       end)
     end
+
+    def map_args(jobs) when is_list(jobs) do
+      Enum.map(jobs, fn(job) -> job |> map_args end)
+    end
+    def map_args({job, score}), do: {map_args(job), score}
+    def map_args(job), do: Map.put(job, :args, inspect(job.args))
   end
 end
